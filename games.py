@@ -49,6 +49,12 @@ def load_image(name, transparent = False):
 				image.set_at((col, row), _rgba_for_color(image.get_at((col, row))[:3], clear_color))
 	return image
 
+def load_images(image_names, transparent = False):
+	''' Load a list of images. Usually used for loading animation frames. '''
+	images = []
+	for name in image_names:
+		images.append(load_image(name, transparent))
+	return images
 
 class Scene(object):
 	''' A game scene which can contain sprites, text, etc. '''
@@ -89,11 +95,11 @@ class Scene(object):
 				
 
 	def remove(self, object):
-		try:
+		if object in self._objects:
 			self._objects.remove(object)
-		except:
-			pass
 
+	def clear(self):
+		self._objects = []
 
 	def add_timer(self, timer):
 		self._timers.append(timer)
@@ -101,6 +107,9 @@ class Scene(object):
 
 	def remove_timer(self, timer):
 		self._timers.remove(timer)
+
+	def clear_timers(self):
+		self._timers = []
 
 	def key_pressed(self, key):
 		return (self._key == key)
@@ -140,21 +149,29 @@ class Scene(object):
 	def unpause(self):
 		self._paused = False
 
-	def begin(self, fps = 40):
+	def begin(self, fps = 60):
 		self._running = True
-		lastTime = time.time()
+		self._loop(fps)
 
+	def quit(self):
+		self._running = False
+		for o in self._objects:
+			if isinstance(o, Timer):
+				o.stop()
+
+	def _loop(self, fps):
+		lastTime = time.time()
 		while self._running:
 			self._clock.tick(fps)
 		
 			self._handle_events()
-			deltaTime = time.time() - lastTime
+			delta_time = time.time() - lastTime
 			lastTime = time.time()
 			if not self._paused:	
 				for object in self._objects:
-					object.update(deltaTime)
+					object.update(delta_time)
 				for timer in self._timers:
-					timer._update_timer()
+					timer._update_timer(delta_time)
 
 			self._screen.fill((0,0,0))
 			if self._background != None:
@@ -163,11 +180,6 @@ class Scene(object):
 				self._screen.blit(object.surface, object._get_rect()) 
 			pygame.display.flip()
 
-	def quit(self):
-		self._running = False
-		for o in self._objects:
-			if isinstance(o, Timer):
-				o.stop()
 class Object(object):
 	''' An object in the scene. '''
 	def __init__(self, x, y, collideable = True):
@@ -186,7 +198,7 @@ class Object(object):
 	def _get_rect(self):
 		return pygame.Rect(self.x-self._xoffset, self.y-self._yoffset, self.width, self.height)
 
-	def update(self):
+	def update(self, delta_time):
 		pass
 
 	def destroy(self):
@@ -248,24 +260,31 @@ class Timer(object):
 		self._counter = 0
 		self.scene = None
 
-	def _update_timer(self):
+	def _update_timer(self , delta_time):
 		if self._running:
-			self._counter += 1
+			self._counter += delta_time
 			if self._counter > self.interval:
 				self._counter = 0
 				self.tick()
 		
 	def tick(self):
+		# Override in subclass
 		pass
 
 	def stop(self):
 		self._running = False
 
+	def start(self):
+		self._running = True
+
 class Delay(object):
 	def __init__(self, function, delay):
 		self.function = function
 		self.delay = delay
-		threading.Timer(self.delay, self.function).start()
+		self._timer = threading.Timer(self.delay, self.function)
+
+	def start(self):
+		self._timer.start()
 
 class Font(object):
 	def __init__(self, filename, size):
@@ -308,14 +327,12 @@ class Text(Object):
 	color = property(getcolor, setcolor)
 
 class Animation(Sprite, Timer):
-	def __init__(self, x, y, image_names, repeating = False, frame_time = 1):
-		Sprite.__init__(self, x, y, None, collideable = False)
-		Timer.__init__(self, frame_time)
-		self.images = []
+	def __init__(self, x, y, images, repeating = False, fps = 15.0):
+		Sprite.__init__(self, x, y, images[0], collideable = False)
+		Timer.__init__(self, 1.0 / fps)
+		self.images = images
 		self._frame = 0
 		self._repeating = repeating
-		for name in image_names:
-			self.images.append(load_image(name, True))
 		self.image = self.images[self._frame]
 
 	def tick(self):
@@ -328,5 +345,5 @@ class Animation(Sprite, Timer):
 			self._frame = 0
 		self.image = self.images[self._frame]
 
-	def update(self):
-		self._update_timer()
+	def update(self, delta_time):
+		self._update_timer(delta_time)
